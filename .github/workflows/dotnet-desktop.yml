@@ -1,38 +1,51 @@
-# Credits to The-Graze/Grate for the auto-build setup
-
-name: .NET
-
+name: Sync Build and Release
 on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
   push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
-
+    branches: ["master"]
 jobs:
-  build:
-    runs-on: ubuntu-latest
-
+  sync-and-release:
+    runs-on: windows-latest
     permissions:
       contents: write
-      actions: read
-
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 8.0.x
-
-    - name: Restore dependencies
-      run: dotnet restore
-
-    - name: Build
-      run: dotnet build --no-restore -c Debug
-
-    - name: Upload build artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-output
-        path: |
-          **/bin/Debug/netstandard2.1/ii's Stupid Menu.dll
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: sync
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/iiDk-the-actual/iis.Stupid.Menu.git
+          git fetch upstream
+          git checkout master
+          git merge upstream/master
+          if [ $(git rev-parse HEAD) != $(git rev-parse @{u}) ]; then
+            git push origin master
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+      - if: steps.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - if: steps.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        run: dotnet restore
+      - if: steps.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        run: dotnet build --no-restore -c Release
+      - if: steps.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        id: tag
+        run: echo "version=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
+        shell: bash
+      - if: steps.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.version }}
+          files: "**/bin/Release/netstandard2.1/ii's Stupid Menu.dll"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
